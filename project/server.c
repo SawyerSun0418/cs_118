@@ -79,36 +79,44 @@ void process_request(const char *request, int client_socket) {
     if (path[0] == '/') {
         memmove(path, path + 1, strlen(path));
     }
-    char *file_ext = strrchr(path, '.');
-    if (file_ext) {
-        for (char *p = file_ext; *p; ++p) *p = tolower(*p);
+    char path_lower[strlen(path) + 1];
+    for (int i = 0; path[i]; ++i) {
+        path_lower[i] = tolower(path[i]);
     }
+    path_lower[strlen(path)] = '\0';
     DIR *dir = opendir(".");
-    struct dirent *entry;
-    const char *content_type = NULL;
-    while ((entry = readdir(dir)) != NULL) {
-        if (strcasecmp(entry->d_name, path) == 0) {
-            if (strstr(path, ".html") != NULL || strstr(path, ".htm") != NULL) {
-                content_type = CONTENT_TYPE_HTML;
-            } else if (strstr(path, ".txt") != NULL) {
-                content_type = CONTENT_TYPE_TXT;
-            } else if (strstr(path, ".jpg") != NULL || strstr(path, ".jpeg") != NULL) {
-                content_type = CONTENT_TYPE_JPEG;
-            } else if (strstr(path, ".png") != NULL) {
-                content_type = CONTENT_TYPE_PNG;
-            } else {
-                send_404(client_socket);
-                return;
-            }
+    if (dir == NULL) {
+        send_404(client_socket);
+        return;
+    }
+    char *file_name = NULL;
+    struct dirent *ent;
+    while ((ent = readdir(dir)) != NULL) {
+        if (strcasecmp(ent->d_name, path_lower) == 0) {
+            file_name = ent->d_name;
             break;
         }
     }
     closedir(dir);
-    if (content_type == NULL) {
+    if (file_name == NULL) {
         send_404(client_socket);
         return;
     }
-    FILE *file = fopen(path_lower, "rb");
+    const char *content_type;
+    char *file_ext = strrchr(file_name, '.');
+    if (file_ext && (strcmp(file_ext, ".html") == 0 || strcmp(file_ext, ".htm") == 0)) {
+        content_type = CONTENT_TYPE_HTML;
+    } else if (file_ext && strcmp(file_ext, ".txt") == 0) {
+        content_type = CONTENT_TYPE_TXT;
+    } else if (file_ext && (strcmp(file_ext, ".jpg") == 0 || strcmp(file_ext, ".jpeg") == 0)) {
+        content_type = CONTENT_TYPE_JPEG;
+    } else if (file_ext && strcmp(file_ext, ".png") == 0) {
+        content_type = CONTENT_TYPE_PNG;
+    } else {
+        send_404(client_socket);
+        return;
+    }
+    FILE *file = fopen(file_name, "rb");
     if (file == NULL) {
         send_404(client_socket);
         return;
