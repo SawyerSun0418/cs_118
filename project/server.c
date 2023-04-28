@@ -1,4 +1,5 @@
 
+
 #include <arpa/inet.h>
 #include <ctype.h>
 #include <netinet/in.h>
@@ -33,27 +34,21 @@ void build_file_map() {
         perror("Error opening directory");
         exit(EXIT_FAILURE);
     }
-
     size_t capacity = 10;
     file_map = malloc(capacity * sizeof(KeyValuePair));
-
     struct dirent *ent;
     while ((ent = readdir(dir)) != NULL) {
         if (file_map_size == capacity) {
             capacity *= 2;
             file_map = realloc(file_map, capacity * sizeof(KeyValuePair));
         }
-
         strncpy(file_map[file_map_size].value, ent->d_name, sizeof(file_map[file_map_size].value));
-
         for (size_t i = 0; i < strlen(ent->d_name); ++i) {
             file_map[file_map_size].key[i] = tolower(ent->d_name[i]);
         }
         file_map[file_map_size].key[strlen(ent->d_name)] = '\0';
-
         file_map_size++;
     }
-
     closedir(dir);
 }
 
@@ -113,19 +108,33 @@ void send_file(FILE *file, int client_socket, const char *content_type) {
 
 void process_request(const char *request, int client_socket) {
     char method[16], path[1024], protocol[16];
-    sscanf(request, "%s %s %s", method, path, protocol);
+    sscanf(request, "%s %1023s %s", method, path, protocol);
     if (strcmp(method, "GET") != 0) {
         send_404(client_socket);
         return;
     }
-    if (path[0] == '/') {
-        memmove(path, path + 1, strlen(path));
+    char decoded_path[1024];
+    size_t i, j;
+    for (i = 0, j = 0; path[i] != '\0'; ++i, ++j) {
+        if (path[i] == '%' && isxdigit(path[i+1]) && isxdigit(path[i+2])) {
+            char hex[3] = {path[i+1], path[i+2], '\0'};
+            decoded_path[j] = (char) strtol(hex, NULL, 16);
+            i += 2;
+        } else if (path[i] == '+') {
+            decoded_path[j] = ' ';
+        } else {
+            decoded_path[j] = path[i];
+        }
     }
-    char path_lower[strlen(path) + 1];
-    for (int i = 0; path[i]; ++i) {
-        path_lower[i] = tolower(path[i]);
+    decoded_path[j] = '\0';
+    if (decoded_path[0] == '/') {
+        memmove(decoded_path, decoded_path + 1, strlen(decoded_path));
     }
-    path_lower[strlen(path)] = '\0';
+    char path_lower[strlen(decoded_path) + 1];
+    for (int i = 0; decoded_path[i]; ++i) {
+        path_lower[i] = tolower(decoded_path[i]);
+    }
+    path_lower[strlen(decoded_path)] = '\0';
     DIR *dir = opendir(".");
     if (dir == NULL) {
         send_404(client_socket);
