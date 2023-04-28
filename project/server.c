@@ -36,7 +36,6 @@ void send_404(int client_socket) {
 
 
 
-
 void send_file(FILE *file, int client_socket, const char *content_type) {
     fseek(file, 0, SEEK_END);
     long file_size = ftell(file);
@@ -79,31 +78,14 @@ void process_request(const char *request, int client_socket) {
     if (path[0] == '/') {
         memmove(path, path + 1, strlen(path));
     }
-    char path_lower[strlen(path) + 1];
-    for (int i = 0; path[i]; ++i) {
-        path_lower[i] = tolower(path[i]);
+    char *file_ext = strrchr(path, '.');
+    if (file_ext) {
+        for (char *p = file_ext; *p; ++p) *p = tolower(*p);
     }
-    path_lower[strlen(path)] = '\0';
-    DIR *dir = opendir(".");
-    if (dir == NULL) {
-        send_404(client_socket);
-        return;
-    }
-    char *file_name = NULL;
-    struct dirent *ent;
-    while ((ent = readdir(dir)) != NULL) {
-        if (strcasecmp(ent->d_name, path_lower) == 0) {
-            file_name = ent->d_name;
-            break;
-        }
-    }
-    closedir(dir);
-    if (file_name == NULL) {
-        send_404(client_socket);
-        return;
-    }
+    char path_lower[1024];
+    strcpy(path_lower, path);
+    for (char *p = path_lower; *p; ++p) *p = tolower(*p);
     const char *content_type;
-    char *file_ext = strrchr(file_name, '.');
     if (file_ext && (strcmp(file_ext, ".html") == 0 || strcmp(file_ext, ".htm") == 0)) {
         content_type = CONTENT_TYPE_HTML;
     } else if (file_ext && strcmp(file_ext, ".txt") == 0) {
@@ -114,9 +96,8 @@ void process_request(const char *request, int client_socket) {
         content_type = CONTENT_TYPE_PNG;
     } else {
         send_404(client_socket);
-        return;
-    }
-    FILE *file = fopen(file_name, "rb");
+        return;}
+    FILE *file = fopen(path_lower, "rb");
     if (file == NULL) {
         send_404(client_socket);
         return;
