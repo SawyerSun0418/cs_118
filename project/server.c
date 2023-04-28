@@ -82,6 +82,9 @@ void process_request(const char *request, int client_socket) {
     if (file_ext) {
         for (char *p = file_ext; *p; ++p) *p = tolower(*p);
     }
+    char path_lower[1024];
+    strcpy(path_lower, path);
+    for (char *p = path_lower; *p; ++p) *p = tolower(*p);
     const char *content_type;
     if (file_ext && (strcmp(file_ext, ".html") == 0 || strcmp(file_ext, ".htm") == 0)) {
         content_type = CONTENT_TYPE_HTML;
@@ -94,7 +97,7 @@ void process_request(const char *request, int client_socket) {
     } else {
         send_404(client_socket);
         return;}
-    FILE *file = fopen(path, "rb");
+    FILE *file = fopen(path_lower, "rb");
     if (file == NULL) {
         send_404(client_socket);
         return;
