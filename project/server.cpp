@@ -1,13 +1,15 @@
 #include <arpa/inet.h>
-#include <ctype.h>
 #include <netinet/in.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <dirent.h>
-#include <stdbool.h>
+#include <string>
+#include <algorithm>
+#include <thread>
+#include <mutex>
 
 #define PORT 8080
 #define HTTP_VERSION "HTTP/1.0"
@@ -16,45 +18,7 @@
 #define CONTENT_TYPE_JPEG "image/jpeg"
 #define CONTENT_TYPE_PNG "image/png"
 
-
-
-typedef struct {
-    char key[1024];
-    char value[1024];
-} KeyValuePair;
-
-KeyValuePair *file_map;
-size_t file_map_size = 0;
-
-void build_file_map() {
-    DIR *dir = opendir(".");
-    if (dir == NULL) {
-        perror("Error opening directory");
-        exit(EXIT_FAILURE);
-    }
-
-    size_t capacity = 10;
-    file_map = malloc(capacity * sizeof(KeyValuePair));
-
-    struct dirent *ent;
-    while ((ent = readdir(dir)) != NULL) {
-        if (file_map_size == capacity) {
-            capacity *= 2;
-            file_map = realloc(file_map, capacity * sizeof(KeyValuePair));
-        }
-
-        strncpy(file_map[file_map_size].value, ent->d_name, sizeof(file_map[file_map_size].value));
-
-        for (size_t i = 0; i < strlen(ent->d_name); ++i) {
-            file_map[file_map_size].key[i] = tolower(ent->d_name[i]);
-        }
-        file_map[file_map_size].key[strlen(ent->d_name)] = '\0';
-
-        file_map_size++;
-    }
-
-    closedir(dir);
-}
+std::mutex mtx;
 
 void send_404(int client_socket) {
     const char *response_header = HTTP_VERSION " 404 Not Found\r\n"
@@ -72,11 +36,6 @@ void send_404(int client_socket) {
     send(client_socket, response_header, strlen(response_header), 0);
     send(client_socket, response_body, strlen(response_body), 0);
 }
-
-
-
-
-
 
 void send_file(FILE *file, int client_socket, const char *content_type) {
     fseek(file, 0, SEEK_END);
@@ -120,49 +79,63 @@ void process_request(const char *request, int client_socket) {
     if (path[0] == '/') {
         memmove(path, path + 1, strlen(path));
     }
-    char path_lower[strlen(path) + 1];
-    for (int i = 0; path[i]; ++i) {
-        path_lower[i] = tolower(path[i]);
-    }
-    path_lower[strlen(path)] = '\0';
+    std::string path_lower(path);
+    std::transform(path_lower.begin(), path_lower.end(), path_lower.begin(), ::tolower);
     DIR *dir = opendir(".");
     if (dir == NULL) {
         send_404(client_socket);
         return;
     }
-    char *file_name = NULL;
-    for (size_t i = 0; i < file_map_size; ++i) {
-        if (strcmp(file_map[i].key, path_lower) == 0) {
-            file_name = file_map[i].value;
+    std::string file_name;
+    bool file_found = false;
+    struct dirent *ent;
+    while ((ent = readdir(dir)) != NULL) {
+        if (strcasecmp(ent->d_name, path_lower.c_str()) == 0) {
+            file_name = ent->d_name;
+            file_found = true;
             break;
         }
     }
     closedir(dir);
-    if (file_name == NULL) {
+    if (!file_found) {
         send_404(client_socket);
         return;
     }
     const char *content_type;
-    char *file_ext = strrchr(file_name, '.');
-    if (file_ext && (strcmp(file_ext, ".html") == 0 || strcmp(file_ext, ".htm") == 0)) {
+    std::string file_ext = file_name.substr(file_name.find_last_of('.'));
+    if (file_ext == ".html" || file_ext == ".htm") {
         content_type = CONTENT_TYPE_HTML;
-    } else if (file_ext && strcmp(file_ext, ".txt") == 0) {
+    } else if (file_ext == ".txt") {
         content_type = CONTENT_TYPE_TXT;
-    } else if (file_ext && (strcmp(file_ext, ".jpg") == 0 || strcmp(file_ext, ".jpeg") == 0)) {
+    } else if (file_ext == ".jpg" || file_ext == ".jpeg") {
         content_type = CONTENT_TYPE_JPEG;
-    } else if (file_ext && strcmp(file_ext, ".png") == 0) {
+    } else if (file_ext == ".png") {
         content_type = CONTENT_TYPE_PNG;
     } else {
         send_404(client_socket);
         return;
     }
-    FILE *file = fopen(file_name, "rb");
+    FILE *file = fopen(file_name.c_str(), "rb");
     if (file == NULL) {
         send_404(client_socket);
         return;
     }
     send_file(file, client_socket, content_type);
     fclose(file);
+}
+
+void handle_client(int client_socket) {
+    char request[4096];
+    ssize_t bytes_received = recv(client_socket, request, sizeof(request) - 1, 0);
+    if (bytes_received < 0) {
+        perror("recv");
+    } else {
+        request[bytes_received] = '\0';
+        process_request(request, client_socket);
+    }
+
+    shutdown(client_socket, SHUT_RDWR);
+    close(client_socket);
 }
 
 
@@ -172,7 +145,6 @@ void process_request(const char *request, int client_socket) {
 
 
 int main() {
-    build_file_map();
     int server_socket = socket(AF_INET, SOCK_STREAM, 0);
     if (server_socket < 0) {
         perror("socket");
@@ -195,7 +167,6 @@ int main() {
         perror("listen");
         exit(EXIT_FAILURE);
     }
-    //printf("Server running on port %d\n", PORT);
     while (1) {
         int client_socket;
         struct sockaddr_in client_addr;
@@ -205,24 +176,9 @@ int main() {
             perror("accept");
             continue;
         }
-        char request[4096];
-        ssize_t bytes_received = recv(client_socket, request, sizeof(request) - 1, 0);
-        if (bytes_received < 0) {
-            perror("recv");
-        } else {
-            request[bytes_received] = '\0';
-            //printf("Received request:\n%s\n", request);
-            process_request(request, client_socket);
-        }
-
-
-
-
-        shutdown(client_socket, SHUT_RDWR);
-        close(client_socket);
+        std::thread client_thread(handle_client, client_socket);
+        client_thread.detach();
     }
-
     close(server_socket);
-    free(file_map);
     return 0;
 }

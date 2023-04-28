@@ -1,10 +1,10 @@
-CC=gcc
+CC=g++-11
 CFLAGS=-I.
 DEPS=
 OBJ=server.o
 USERID=123456789
 
-%.o: %.c $(DEPS)
+%.o: %.cpp $(DEPS)
 	$(CC) -c -o $@ $< $(CFLAGS)
 
 all: server
