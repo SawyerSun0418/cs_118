@@ -6,6 +6,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <dirent.h>
 
 #define PORT 8080
 #define HTTP_VERSION "HTTP/1.0"
@@ -82,21 +83,31 @@ void process_request(const char *request, int client_socket) {
     if (file_ext) {
         for (char *p = file_ext; *p; ++p) *p = tolower(*p);
     }
-    char path_lower[1024];
-    strcpy(path_lower, path);
-    for (char *p = path_lower; *p; ++p) *p = tolower(*p);
-    const char *content_type;
-    if (file_ext && (strcmp(file_ext, ".html") == 0 || strcmp(file_ext, ".htm") == 0)) {
-        content_type = CONTENT_TYPE_HTML;
-    } else if (file_ext && strcmp(file_ext, ".txt") == 0) {
-        content_type = CONTENT_TYPE_TXT;
-    } else if (file_ext && (strcmp(file_ext, ".jpg") == 0 || strcmp(file_ext, ".jpeg") == 0)) {
-        content_type = CONTENT_TYPE_JPEG;
-    } else if (file_ext && strcmp(file_ext, ".png") == 0) {
-        content_type = CONTENT_TYPE_PNG;
-    } else {
+    DIR *dir = opendir(".");
+    struct dirent *entry;
+    const char *content_type = NULL;
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcasecmp(entry->d_name, path) == 0) {
+            if (strstr(path, ".html") != NULL || strstr(path, ".htm") != NULL) {
+                content_type = CONTENT_TYPE_HTML;
+            } else if (strstr(path, ".txt") != NULL) {
+                content_type = CONTENT_TYPE_TXT;
+            } else if (strstr(path, ".jpg") != NULL || strstr(path, ".jpeg") != NULL) {
+                content_type = CONTENT_TYPE_JPEG;
+            } else if (strstr(path, ".png") != NULL) {
+                content_type = CONTENT_TYPE_PNG;
+            } else {
+                send_404(client_socket);
+                return;
+            }
+            break;
+        }
+    }
+    closedir(dir);
+    if (content_type == NULL) {
         send_404(client_socket);
-        return;}
+        return;
+    }
     FILE *file = fopen(path_lower, "rb");
     if (file == NULL) {
         send_404(client_socket);
